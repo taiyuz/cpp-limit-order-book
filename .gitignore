@@ -1,0 +1,30 @@
+# Build trees
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+
+# Compilers / IDEs
+.compile_commands.json
+compile_commands.json
+.cache/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Objects / libs
+*.o
+*.a
+*.so
+*.dylib
+*.d
+
+# Python / OS
+__pycache__/
+.DS_Store
+Thumbs.db
+
+# FetchContent debris if someone builds in-tree
+/_deps/
