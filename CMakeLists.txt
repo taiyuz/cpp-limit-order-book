@@ -26,7 +26,10 @@ function(lob_set_sanitizers target)
     endif()
 endfunction()
 
-add_library(lob src/version.cpp)
+add_library(lob
+    src/version.cpp
+    src/engine.cpp
+)
 add_library(lob::lob ALIAS lob)
 target_include_directories(lob PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
