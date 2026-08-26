@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(LOB_BUILD_TESTS "Build GoogleTest correctness suite" ON)
-option(LOB_BUILD_BENCH "Build benchmark harness + Google Benchmark" OFF)
+option(LOB_BUILD_BENCH "Build benchmark harness + Google Benchmark" ON)
 option(LOB_ENABLE_SANITIZERS "Enable ASan + UBSan (Debug-friendly)" OFF)
 
 function(lob_set_warnings target)
@@ -57,4 +57,25 @@ if(LOB_BUILD_TESTS)
     lob_set_warnings(lob_tests)
     lob_set_sanitizers(lob_tests)
     add_test(NAME lob_tests COMMAND lob_tests)
+endif()
+
+if(LOB_BUILD_BENCH)
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        googlebenchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG        v1.9.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(googlebenchmark)
+
+    add_executable(lob_harness bench/harness.cpp)
+    target_link_libraries(lob_harness PRIVATE lob::lob)
+    lob_set_warnings(lob_harness)
+
+    add_executable(lob_bench bench/bench_engine.cpp)
+    target_link_libraries(lob_bench PRIVATE lob::lob benchmark::benchmark)
+    lob_set_warnings(lob_bench)
 endif()
