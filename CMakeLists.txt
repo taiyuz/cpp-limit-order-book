@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(LOB_BUILD_TESTS "Build GoogleTest correctness suite" OFF)
+option(LOB_BUILD_TESTS "Build GoogleTest correctness suite" ON)
 option(LOB_BUILD_BENCH "Build benchmark harness + Google Benchmark" OFF)
 option(LOB_ENABLE_SANITIZERS "Enable ASan + UBSan (Debug-friendly)" OFF)
 
@@ -37,3 +37,24 @@ target_include_directories(lob PUBLIC
 )
 lob_set_warnings(lob)
 lob_set_sanitizers(lob)
+
+include(FetchContent)
+
+if(LOB_BUILD_TESTS)
+    include(CTest)
+    enable_testing()
+    set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.15.2
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(googletest)
+    add_executable(lob_tests tests/test_engine.cpp)
+    target_link_libraries(lob_tests PRIVATE lob::lob GTest::gtest_main)
+    lob_set_warnings(lob_tests)
+    lob_set_sanitizers(lob_tests)
+    add_test(NAME lob_tests COMMAND lob_tests)
+endif()
