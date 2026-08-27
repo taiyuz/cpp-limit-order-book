@@ -12,11 +12,11 @@ concurrency:
 jobs:
   test:
     name: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
       - name: Configure
         run: cmake --preset default -DLOB_BUILD_BENCH=OFF
       - name: Build
@@ -26,11 +26,11 @@ jobs:
 
   sanitizers:
     name: asan-ubsan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++
       - name: Configure
         run: cmake --preset asan
       - name: Build
