@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <iosfwd>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -16,6 +17,27 @@ namespace lob {
 
 using Result = std::expected<FillReport, Error>;
 using CancelResult = std::expected<void, Error>;
+
+// Point-in-time copy of one resting order. For debugging / tests, not recovery.
+struct RestingOrderView {
+    OrderId id{};
+    Price price{};
+    Qty remaining{};
+    Side side{Side::Buy};
+};
+
+// One live price: aggregate qty plus FIFO (head = oldest).
+struct LevelSnapshot {
+    Price price{};
+    Qty total_qty{};
+    std::uint32_t order_count{};
+    std::vector<RestingOrderView> orders;
+};
+
+struct BookSnapshot {
+    std::vector<LevelSnapshot> bids;  // best first
+    std::vector<LevelSnapshot> asks;  // best first
+};
 
 // Single-instrument matching engine. Not thread-safe: one matching thread owns
 // the book. See DESIGN.md for a lock-free / multi-instrument sketch.
@@ -53,6 +75,10 @@ public:
     [[nodiscard]] std::size_t ask_levels() const noexcept { return book_.ask_level_count(); }
     [[nodiscard]] std::size_t memory_bytes() const noexcept;
     [[nodiscard]] const OrderBook& book() const noexcept { return book_; }
+
+    // Debug copy of live levels. Allocates; not a journal and not on the hot path.
+    [[nodiscard]] BookSnapshot snapshot() const;
+    void dump(std::ostream& os) const;
 
 private:
     Qty match_buy(OrderNode* taker, bool market);

@@ -1,5 +1,8 @@
 #include "lob/engine.hpp"
 
+#include <ostream>
+#include <string_view>
+
 namespace lob {
 
 MatchingEngine::MatchingEngine(std::size_t expected_orders, std::size_t pool_block)
@@ -28,6 +31,57 @@ std::size_t MatchingEngine::memory_bytes() const noexcept {
                                     index_.size() * (sizeof(OrderId) + sizeof(OrderNode*));
     const std::size_t trades_bytes = trades_.capacity() * sizeof(Trade);
     return pool_.memory_bytes() + book_.memory_bytes() + index_bytes + trades_bytes;
+}
+
+BookSnapshot MatchingEngine::snapshot() const {
+    BookSnapshot snap;
+    snap.bids.reserve(book_.bid_level_count());
+    snap.asks.reserve(book_.ask_level_count());
+
+    auto copy_side = [](const auto& levels, Side side, std::vector<LevelSnapshot>& out) {
+        for (const auto& [px, lvl] : levels) {
+            LevelSnapshot row;
+            row.price = px;
+            row.total_qty = lvl.total_qty();
+            row.order_count = lvl.size();
+            row.orders.reserve(lvl.size());
+            for (const OrderNode* n = lvl.front(); n != nullptr; n = n->next) {
+                row.orders.push_back(RestingOrderView{
+                    .id = n->id,
+                    .price = n->price,
+                    .remaining = n->remaining,
+                    .side = side,
+                });
+            }
+            out.push_back(std::move(row));
+        }
+    };
+    copy_side(book_.bids(), Side::Buy, snap.bids);
+    copy_side(book_.asks(), Side::Sell, snap.asks);
+    return snap;
+}
+
+void MatchingEngine::dump(std::ostream& os) const {
+    const BookSnapshot snap = snapshot();
+    os << "resting=" << resting_orders() << " bid_levels=" << snap.bids.size()
+       << " ask_levels=" << snap.asks.size() << '\n';
+
+    const auto write_side = [&os](std::string_view name, const std::vector<LevelSnapshot>& levels) {
+        os << name << '\n';
+        for (const LevelSnapshot& lvl : levels) {
+            os << "  px=" << lvl.price << " qty=" << lvl.total_qty << " n=" << lvl.order_count
+               << " [";
+            for (std::size_t i = 0; i < lvl.orders.size(); ++i) {
+                if (i != 0) {
+                    os << ' ';
+                }
+                os << lvl.orders[i].id << ':' << lvl.orders[i].remaining;
+            }
+            os << "]\n";
+        }
+    };
+    write_side("bids", snap.bids);
+    write_side("asks", snap.asks);
 }
 
 Result MatchingEngine::submit(Side side, OrderType type, Price price, Qty qty) {

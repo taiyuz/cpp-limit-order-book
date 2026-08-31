@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -336,4 +337,103 @@ TEST(IntegerTicks, NoFractionalPrices) {
     auto buy = eng.submit(Side::Buy, OrderType::Limit, 123456789, 1);
     ASSERT_EQ(eng.last_trades()[0].price, 123456789);
     EXPECT_EQ(buy->filled, 1);
+}
+
+TEST(Ids, SequentialAndUnique) {
+    MatchingEngine eng;
+    auto a = eng.submit(Side::Buy, OrderType::Limit, 100, 1);
+    auto b = eng.submit(Side::Buy, OrderType::Limit, 99, 1);
+    auto c = eng.submit(Side::Sell, OrderType::Limit, 101, 1);
+    ASSERT_TRUE(a);
+    ASSERT_TRUE(b);
+    ASSERT_TRUE(c);
+    EXPECT_NE(a->order_id, b->order_id);
+    EXPECT_NE(b->order_id, c->order_id);
+    EXPECT_EQ(a->order_id + 1, b->order_id);
+    EXPECT_EQ(b->order_id + 1, c->order_id);
+}
+
+TEST(Match, NoSelfTradePrevention) {
+    // No owner/account on the order: a later sell against a resting buy in the
+    // same engine still matches. STP is out of scope (see DESIGN.md).
+    MatchingEngine eng;
+    auto bid = eng.submit(Side::Buy, OrderType::Limit, 100, 5);
+    auto ask = eng.submit(Side::Sell, OrderType::Limit, 100, 5);
+    ASSERT_TRUE(bid);
+    ASSERT_TRUE(ask);
+    EXPECT_EQ(ask->filled, 5);
+    EXPECT_FALSE(ask->resting);
+    ASSERT_EQ(eng.last_trades().size(), 1u);
+    EXPECT_EQ(eng.last_trades()[0].maker_id, bid->order_id);
+    EXPECT_EQ(eng.last_trades()[0].taker_id, ask->order_id);
+    EXPECT_EQ(eng.resting_orders(), 0u);
+}
+
+TEST(Cancel, FilledIdAndDoubleCancel) {
+    MatchingEngine eng;
+    auto maker = eng.submit(Side::Sell, OrderType::Limit, 100, 1);
+    ASSERT_TRUE(eng.submit(Side::Buy, OrderType::Limit, 100, 1));
+    auto r = eng.cancel(maker->order_id);
+    ASSERT_FALSE(r);
+    EXPECT_EQ(r.error(), Error::NotFound);
+
+    auto live = eng.submit(Side::Buy, OrderType::Limit, 90, 1);
+    ASSERT_TRUE(eng.cancel(live->order_id));
+    r = eng.cancel(live->order_id);
+    ASSERT_FALSE(r);
+    EXPECT_EQ(r.error(), Error::NotFound);
+}
+
+TEST(Snapshot, EmptyBook) {
+    MatchingEngine eng;
+    const BookSnapshot snap = eng.snapshot();
+    EXPECT_TRUE(snap.bids.empty());
+    EXPECT_TRUE(snap.asks.empty());
+    EXPECT_EQ(eng.resting_orders(), 0u);
+}
+
+TEST(Snapshot, FifoAndBestFirst) {
+    MatchingEngine eng;
+    auto bid_low = eng.submit(Side::Buy, OrderType::Limit, 99, 2);
+    auto bid_a = eng.submit(Side::Buy, OrderType::Limit, 100, 3);
+    auto bid_b = eng.submit(Side::Buy, OrderType::Limit, 100, 1);
+    auto ask_a = eng.submit(Side::Sell, OrderType::Limit, 110, 4);
+    auto ask_high = eng.submit(Side::Sell, OrderType::Limit, 111, 5);
+    ASSERT_TRUE(bid_low);
+    ASSERT_TRUE(bid_a);
+    ASSERT_TRUE(bid_b);
+    ASSERT_TRUE(ask_a);
+    ASSERT_TRUE(ask_high);
+
+    const BookSnapshot snap = eng.snapshot();
+    ASSERT_EQ(snap.bids.size(), 2u);
+    EXPECT_EQ(snap.bids[0].price, 100);
+    EXPECT_EQ(snap.bids[0].total_qty, 4);
+    ASSERT_EQ(snap.bids[0].orders.size(), 2u);
+    EXPECT_EQ(snap.bids[0].orders[0].id, bid_a->order_id);
+    EXPECT_EQ(snap.bids[0].orders[1].id, bid_b->order_id);
+    EXPECT_EQ(snap.bids[0].orders[0].remaining, 3);
+    EXPECT_EQ(snap.bids[1].price, 99);
+    EXPECT_EQ(snap.bids[1].orders[0].id, bid_low->order_id);
+
+    ASSERT_EQ(snap.asks.size(), 2u);
+    EXPECT_EQ(snap.asks[0].price, 110);
+    EXPECT_EQ(snap.asks[0].total_qty, 4);
+    EXPECT_EQ(snap.asks[0].orders[0].id, ask_a->order_id);
+    EXPECT_EQ(snap.asks[1].price, 111);
+    EXPECT_EQ(snap.asks[1].orders[0].id, ask_high->order_id);
+}
+
+TEST(Dump, PrintsBothSides) {
+    MatchingEngine eng;
+    ASSERT_TRUE(eng.submit(Side::Buy, OrderType::Limit, 99, 2));
+    ASSERT_TRUE(eng.submit(Side::Sell, OrderType::Limit, 101, 3));
+    std::ostringstream oss;
+    eng.dump(oss);
+    const std::string out = oss.str();
+    EXPECT_NE(out.find("bids"), std::string::npos);
+    EXPECT_NE(out.find("asks"), std::string::npos);
+    EXPECT_NE(out.find("99"), std::string::npos);
+    EXPECT_NE(out.find("101"), std::string::npos);
+    EXPECT_NE(out.find("resting=2"), std::string::npos);
 }

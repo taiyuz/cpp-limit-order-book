@@ -56,6 +56,7 @@ by one incoming order. Hash ops are amortized expected O(1).
 | Modify qty up or price | O(log P + match) | pulled, loses time priority, may re-cross |
 | BBO / `top()` | O(1) | `map::begin()` |
 | Quantity at a price | O(log P) | map find |
+| `snapshot()` / `dump()` | O(P + N) | allocates; debug only, not the hot path |
 
 Incoming orders match at the **maker** price (price-time). Buy limits cross
 asks with `ask <= limit`; sell limits cross bids with `bid >= limit`. The book
@@ -132,12 +133,19 @@ Gateway ──► shard(instrument_id) ──► engine[i].submit(...)
 | Modify qty down, same price | yes | keeps queue position |
 | Modify qty up or price | maybe | new time priority; aggressive price will take |
 
-No IOC/FOK flags, no hidden/iceberg, no self-trade prevention, no STP, no
-lots/tick validation beyond `> 0`, no persistence, no recovery log.
+No IOC/FOK flags, no hidden/iceberg, no auctions, no self-trade prevention, no
+STP, no lots/tick validation beyond `> 0`, no persistence, no recovery log.
+
+## Debug snapshot
+
+`MatchingEngine::snapshot()` copies live levels (best first) and the FIFO at
+each level. `dump(std::ostream&)` prints that for tests and gdb. Neither is a
+recovery image: there is no restore, WAL, or crash replay. Keep them off the
+matching hot path; they allocate.
 
 ## Testing stance
 
 Correctness is in `tests/test_engine.cpp` (FIFO, price-time, partials, market
-walks, cancel-in-the-middle, modify priority, book never crosses). CI runs that
-suite under ASan+UBSan. Latency is a separate harness so sanitizers do not
-pollute numbers.
+walks, cancel-in-the-middle, modify priority, book never crosses, empty-book
+market, unique ids, no STP, debug snapshot). CI runs that suite under
+ASan+UBSan. Latency is a separate harness so sanitizers do not pollute numbers.
