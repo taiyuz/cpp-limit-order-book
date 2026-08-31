@@ -1,9 +1,15 @@
 # cpp-limit-order-book
 
-A single-instrument limit-order-book matching engine in C++23: integer-tick
-prices, intrusive FIFO levels, O(1) order-id cancel, and a slab allocator so
-the hot path does not `new` per order. Written to be read in an interview, not
-to be a full exchange.
+[![CI](https://img.shields.io/github/actions/workflow/status/taiyuz/cpp-limit-order-book/ci.yml?branch=main)](https://github.com/taiyuz/cpp-limit-order-book/actions/workflows/ci.yml)
+
+C++23 matching engine for a single instrument: price-time priority (best price,
+then FIFO at the level), O(1) cancel by order id, integer-tick prices, and a
+slab-allocated intrusive book so the hot path does not `new` per order. CI on
+`ubuntu-24.04` builds with CMake presets and runs the suite under ASan/UBSan.
+Written to be read in a DRW / HF interview, not operated as a colocated matching
+core — no production-latency claims.
+
+Author: [Taiyu Zhu](https://github.com/taiyuz).
 
 ## Architecture
 
@@ -35,7 +41,7 @@ cmake --build --preset default
 ctest --preset default --output-on-failure
 ```
 
-Sanitizers:
+Sanitizers (same path CI uses):
 
 ```bash
 cmake --preset asan
@@ -51,8 +57,9 @@ ctest --preset asan --output-on-failure
 
 The suite covers limit/market matching, partial fills, FIFO at a level,
 price-time across levels, cancel (including middle-of-queue), modify (qty-down
-keeps priority, qty-up loses it, aggressive price takes), and the invariant
-that the book never rests a crossing order.
+keeps priority, qty-up loses it, aggressive price takes), reject/empty-book
+edge cases, and a debug snapshot of resting levels. The book never rests a
+crossing order.
 
 ## Benchmarks
 
@@ -105,11 +112,13 @@ still for a tight dense range; it is the wrong default for a wide book.
 ## Limitations
 
 - One instrument, one thread. Not safe to share a `MatchingEngine`.
-- Limit (GTC) and market only. No IOC/FOK, iceberg, stop, or hidden.
+- Limit (GTC) and market only. No IOC/FOK, iceberg, stop, hidden, or auctions.
 - No self-trade prevention, no accounts, no fees, no tick/lot table.
-- No journal / snapshot / recovery.
+- No journal / recovery. `snapshot()` / `dump()` copy live book state for
+  debugging; they do not persist or restore.
 - Modify qty-up or price change **loses** time priority (documented, tested).
 - `last_trades()` is overwritten by the next mutating call.
 - Hash lookup is amortized O(1); a degenerate table is still a hash table.
 
 MIT licensed. Design discussion lives in [DESIGN.md](DESIGN.md).
+How to contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
