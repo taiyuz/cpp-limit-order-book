@@ -15,7 +15,7 @@ Author: [Taiyu Zhu](https://github.com/taiyuz).
 
 ```mermaid
 flowchart LR
-  Client["submit / cancel / modify"] --> Engine["MatchingEngine"]
+  Client["submit / cancel / modify / replace"] --> Engine["MatchingEngine"]
   Engine --> Pool["NodePool<br/>64 B OrderNode slabs"]
   Engine --> Index["unordered_map&lt;OrderId, OrderNode*&gt;"]
   Engine --> Book["OrderBook"]
@@ -57,7 +57,8 @@ ctest --preset asan --output-on-failure
 
 The suite covers limit/market matching, partial fills, FIFO at a level,
 price-time across levels, cancel (including middle-of-queue), modify (qty-down
-keeps priority, qty-up loses it, aggressive price takes), reject/empty-book
+keeps priority, qty-up loses it, aggressive price takes), replace (new id,
+always loses time priority, missing id is a no-op), reject/empty-book
 edge cases, and a debug snapshot of resting levels. The book never rests a
 crossing order.
 
@@ -100,8 +101,8 @@ mixed 70% rest / 20% cancel / 10% market.
 | Allocation | `NodePool` free-list of slabs | no per-order heap on the hot path |
 | Level | doubly-linked FIFO | O(1) cancel given the node |
 | Prices | `std::map` best-first | sparse P, O(1) BBO, stable node addresses |
-| Id lookup | `unordered_map<OrderId, OrderNode*>` | O(1) cancel / modify |
-| Errors | `std::expected` | no exceptions on submit/cancel/modify |
+| Id lookup | `unordered_map<OrderId, OrderNode*>` | O(1) cancel / modify / replace |
+| Errors | `std::expected` | no exceptions on submit/cancel/modify/replace |
 
 Vs. `std::map<Price, std::deque<Order>>`: a deque cannot cancel in O(1)
 without storing iterators (which invalidate), allocates in chunks, and copies
@@ -117,6 +118,8 @@ still for a tight dense range; it is the wrong default for a wide book.
 - No journal / recovery. `snapshot()` / `dump()` copy live book state for
   debugging; they do not persist or restore.
 - Modify qty-up or price change **loses** time priority (documented, tested).
+- Replace is cancel + new GTC limit: new id, same side, always new time priority.
+  Invalid params do not pull the original. Unknown id is `NotFound` and inserts nothing.
 - `last_trades()` is overwritten by the next mutating call.
 - Hash lookup is amortized O(1); a degenerate table is still a hash table.
 
