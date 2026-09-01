@@ -14,7 +14,7 @@ MatchingEngine
 │     ├── bids: std::map<Price, PriceLevel, greater<>>   best = begin()
 │     └── asks: std::map<Price, PriceLevel, less<>>      best = begin()
 │           └── PriceLevel: intrusive doubly-linked FIFO (head = oldest)
-└── unordered_map<OrderId, OrderNode*>                   cancel / modify
+└── unordered_map<OrderId, OrderNode*>                   cancel / modify / replace
 ```
 
 `OrderNode` is exactly 64 bytes: `prev`, `next`, `level*`, `id`, `price`,
@@ -54,6 +54,7 @@ by one incoming order. Hash ops are amortized expected O(1).
 | Cancel | O(1) typical | O(log P) if that order was the last at its price |
 | Modify qty down, same px | O(1) | stays in FIFO, keeps time priority |
 | Modify qty up or price | O(log P + match) | pulled, loses time priority, may re-cross |
+| Replace | O(log P + match) | cancel + new GTC limit; always new id / time priority |
 | BBO / `top()` | O(1) | `map::begin()` |
 | Quantity at a price | O(log P) | map find |
 | `snapshot()` / `dump()` | O(P + N) | allocates; debug only, not the hot path |
@@ -76,7 +77,7 @@ monotonic `uint64`.
 ## Hot-path constraints
 
 - No virtual dispatch. `MatchingEngine` is a concrete type.
-- No exceptions on submit/cancel/modify. Errors are `std::expected<FillReport, Error>`.
+- No exceptions on submit/cancel/modify/replace. Errors are `std::expected<FillReport, Error>`.
   (`NodePool::grow` can throw `std::bad_alloc`; that is the setup path, not a fill.)
 - No per-order `new`/`delete`. Steady-state construct/destroy is a pointer bump
   on the free list. First touch of a slab is the only malloc.
@@ -132,9 +133,15 @@ Gateway ──► shard(instrument_id) ──► engine[i].submit(...)
 | Cancel | — | unknown id → `Error::NotFound` |
 | Modify qty down, same price | yes | keeps queue position |
 | Modify qty up or price | maybe | new time priority; aggressive price will take |
+| Replace | maybe | cancel then new GTC limit, same side; new id; always new time priority |
 
 No IOC/FOK flags, no hidden/iceberg, no auctions, no self-trade prevention, no
 STP, no lots/tick validation beyond `> 0`, no persistence, no recovery log.
+
+Replace is not modify. `modify` keeps the order id; qty-down at the same price
+keeps FIFO place. `replace` always allocates a new id, always goes to the back
+of the (new) level, and never flips side. Bad qty/price reject without pulling
+the original. Unknown id is `NotFound` and inserts nothing.
 
 ## Debug snapshot
 
@@ -145,7 +152,9 @@ matching hot path; they allocate.
 
 ## Testing stance
 
-Correctness is in `tests/test_engine.cpp` (FIFO, price-time, partials, market
-walks, cancel-in-the-middle, modify priority, book never crosses, empty-book
-market, unique ids, no STP, debug snapshot). CI runs that suite under
-ASan+UBSan. Latency is a separate harness so sanitizers do not pollute numbers.
+Correctness is in `tests/test_engine.cpp` and `tests/test_replace.cpp` (FIFO,
+price-time, partials, market walks, cancel-in-the-middle, modify priority,
+replace new-id / FIFO loss / aggressive remainder / missing id, book never
+crosses, empty-book market, unique ids, no STP, debug snapshot). CI runs that
+suite under ASan+UBSan. Latency is a separate harness so sanitizers do not
+pollute numbers.
