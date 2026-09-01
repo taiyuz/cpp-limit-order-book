@@ -158,6 +158,35 @@ Result MatchingEngine::modify(OrderId id, Price new_price, Qty new_qty) {
     return finish(node, filled, /*market=*/false);
 }
 
+Result MatchingEngine::replace(OrderId id, Price new_price, Qty new_qty) {
+    trades_.clear();
+    if (new_qty <= 0) {
+        return std::unexpected(Error::InvalidQty);
+    }
+    if (new_price <= 0) {
+        return std::unexpected(Error::InvalidPrice);
+    }
+
+    auto it = index_.find(id);
+    if (it == index_.end()) {
+        return std::unexpected(Error::NotFound);
+    }
+
+    OrderNode* old = it->second;
+    const Side side = old->side;
+    destroy_resting(old);
+
+    OrderNode* node = pool_.construct();
+    node->id = next_id_++;
+    node->price = new_price;
+    node->remaining = new_qty;
+    node->seq = next_seq_++;
+    node->side = side;
+
+    const Qty filled = (side == Side::Buy) ? match_buy(node, false) : match_sell(node, false);
+    return finish(node, filled, /*market=*/false);
+}
+
 Qty MatchingEngine::match_buy(OrderNode* taker, bool market) {
     Qty filled = 0;
     while (taker->remaining > 0) {

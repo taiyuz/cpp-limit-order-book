@@ -62,6 +62,12 @@ public:
     // change that crosses the spread is aggressive and matches immediately.
     [[nodiscard]] Result modify(OrderId id, Price new_price, Qty new_qty);
 
+    // Cancel the resting order and submit a new GTC limit on the same side.
+    // Always a new id and a new time priority (back of the (new) level). Bad
+    // qty/price leave the original untouched. Unknown id is NotFound and inserts
+    // nothing.
+    [[nodiscard]] Result replace(OrderId id, Price new_price, Qty new_qty);
+
     [[nodiscard]] std::span<const Trade> last_trades() const noexcept { return trades_; }
 
     [[nodiscard]] std::optional<Price> best_bid() const noexcept { return book_.best_bid(); }
