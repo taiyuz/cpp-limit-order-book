@@ -52,7 +52,10 @@ if(LOB_BUILD_TESTS)
         GIT_SHALLOW    TRUE
     )
     FetchContent_MakeAvailable(googletest)
-    add_executable(lob_tests tests/test_engine.cpp)
+    add_executable(lob_tests
+        tests/test_engine.cpp
+        tests/test_replace.cpp
+    )
     target_link_libraries(lob_tests PRIVATE lob::lob GTest::gtest_main)
     lob_set_warnings(lob_tests)
     lob_set_sanitizers(lob_tests)
