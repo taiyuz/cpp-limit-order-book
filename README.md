@@ -58,9 +58,10 @@ ctest --preset asan --output-on-failure
 The suite covers limit/market matching, partial fills, FIFO at a level,
 price-time across levels, cancel (including middle-of-queue), modify (qty-down
 keeps priority, qty-up loses it, aggressive price takes), replace (new id,
-always loses time priority, missing id is a no-op), reject/empty-book
-edge cases, and a debug snapshot of resting levels. The book never rests a
-crossing order.
+always loses time priority, missing id is a no-op), IOC (leftover cancelled,
+still respects the limit), FOK (full qty or `WouldNotFill`, makers untouched),
+reject/empty-book edge cases, and a debug snapshot of resting levels. The book
+never rests a crossing order.
 
 ## Benchmarks
 
@@ -113,14 +114,16 @@ still for a tight dense range; it is the wrong default for a wide book.
 ## Limitations
 
 - One instrument, one thread. Not safe to share a `MatchingEngine`.
-- Limit (GTC) and market only. No IOC/FOK, iceberg, stop, hidden, or auctions.
+- Limit GTC / IOC / FOK and market (market FOK is all-or-nothing). No iceberg,
+  stop, hidden, or auctions. Market leftover never rests, even if tagged GTC.
 - No self-trade prevention, no accounts, no fees, no tick/lot table.
 - No journal / recovery. `snapshot()` / `dump()` copy live book state for
   debugging; they do not persist or restore.
 - Modify qty-up or price change **loses** time priority (documented, tested).
 - Replace is cancel + new GTC limit: new id, same side, always new time priority.
   Invalid params do not pull the original. Unknown id is `NotFound` and inserts nothing.
-- `last_trades()` is overwritten by the next mutating call.
+- `last_trades()` is overwritten by the next mutating call. A FOK reject leaves
+  it empty and does not touch makers.
 - Hash lookup is amortized O(1); a degenerate table is still a hash table.
 
 MIT licensed. Design discussion lives in [DESIGN.md](DESIGN.md).

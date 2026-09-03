@@ -28,11 +28,11 @@ tests compile with `-Wall -Wextra -Werror`.
 
 ## Scope
 
-**In:** limit (GTC) and market matching, cancel, modify, replace (new id, same
-side), book invariants, debug snapshot of resting levels.
+**In:** limit GTC / IOC / FOK and market matching, cancel, modify, replace (new
+id, same side), book invariants, debug snapshot of resting levels.
 
-**Out:** iceberg / hidden / auctions, IOC/FOK flags, stop orders, accounts and
-self-trade prevention, persistence, multi-instrument routing, sharing one
-`MatchingEngine` across threads.
+**Out:** iceberg / hidden / auctions, stop orders, accounts and self-trade
+prevention, persistence, multi-instrument routing, sharing one `MatchingEngine`
+across threads.
 
 See [DESIGN.md](DESIGN.md) for layout, complexity, and the lock-free sketch.
