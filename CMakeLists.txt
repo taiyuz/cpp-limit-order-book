@@ -55,6 +55,7 @@ if(LOB_BUILD_TESTS)
     add_executable(lob_tests
         tests/test_engine.cpp
         tests/test_replace.cpp
+        tests/test_tif.cpp
     )
     target_link_libraries(lob_tests PRIVATE lob::lob GTest::gtest_main)
     lob_set_warnings(lob_tests)
