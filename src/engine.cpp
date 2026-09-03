@@ -84,13 +84,39 @@ void MatchingEngine::dump(std::ostream& os) const {
     write_side("asks", snap.asks);
 }
 
-Result MatchingEngine::submit(Side side, OrderType type, Price price, Qty qty) {
+Qty MatchingEngine::available_to_take(Side side, Price limit, bool market) const noexcept {
+    Qty avail = 0;
+    if (side == Side::Buy) {
+        for (const auto& [px, lvl] : book_.asks()) {
+            if (!market && px > limit) {
+                break;
+            }
+            avail += lvl.total_qty();
+        }
+    } else {
+        for (const auto& [px, lvl] : book_.bids()) {
+            if (!market && px < limit) {
+                break;
+            }
+            avail += lvl.total_qty();
+        }
+    }
+    return avail;
+}
+
+Result MatchingEngine::submit(Side side, OrderType type, Price price, Qty qty, TimeInForce tif) {
     trades_.clear();
     if (qty <= 0) {
         return std::unexpected(Error::InvalidQty);
     }
     if (type == OrderType::Limit && price <= 0) {
         return std::unexpected(Error::InvalidPrice);
+    }
+
+    const bool market = type == OrderType::Market;
+    // FOK peeks crossing liquidity first so a reject cannot leave partial fills.
+    if (tif == TimeInForce::Fok && available_to_take(side, price, market) < qty) {
+        return std::unexpected(Error::WouldNotFill);
     }
 
     OrderNode* node = pool_.construct();
@@ -100,9 +126,9 @@ Result MatchingEngine::submit(Side side, OrderType type, Price price, Qty qty) {
     node->seq = next_seq_++;
     node->side = side;
 
-    const bool market = type == OrderType::Market;
     const Qty filled = (side == Side::Buy) ? match_buy(node, market) : match_sell(node, market);
-    return finish(node, filled, market);
+    const bool rest_remainder = !market && tif == TimeInForce::Gtc;
+    return finish(node, filled, rest_remainder);
 }
 
 CancelResult MatchingEngine::cancel(OrderId id) {
@@ -155,7 +181,7 @@ Result MatchingEngine::modify(OrderId id, Price new_price, Qty new_qty) {
     node->seq = next_seq_++;
 
     const Qty filled = (side == Side::Buy) ? match_buy(node, false) : match_sell(node, false);
-    return finish(node, filled, /*market=*/false);
+    return finish(node, filled, /*rest_remainder=*/true);
 }
 
 Result MatchingEngine::replace(OrderId id, Price new_price, Qty new_qty) {
@@ -184,7 +210,7 @@ Result MatchingEngine::replace(OrderId id, Price new_price, Qty new_qty) {
     node->side = side;
 
     const Qty filled = (side == Side::Buy) ? match_buy(node, false) : match_sell(node, false);
-    return finish(node, filled, /*market=*/false);
+    return finish(node, filled, /*rest_remainder=*/true);
 }
 
 Qty MatchingEngine::match_buy(OrderNode* taker, bool market) {
@@ -276,19 +302,19 @@ void MatchingEngine::destroy_resting(OrderNode* node) {
     pool_.destroy(node);
 }
 
-Result MatchingEngine::finish(OrderNode* node, Qty filled, bool market) {
+Result MatchingEngine::finish(OrderNode* node, Qty filled, bool rest_remainder) {
     FillReport report{};
     report.order_id = node->id;
     report.filled = filled;
     report.remaining = node->remaining;
 
-    if (!market && node->remaining > 0) {
+    if (rest_remainder && node->remaining > 0) {
         rest(node);
         report.resting = true;
         return report;
     }
 
-    // Market leftover is cancelled (not rested). remaining is the cancelled qty.
+    // IOC leftover, FOK (fully filled), and market leftover are cancelled, not rested.
     pool_.destroy(node);
     report.resting = false;
     return report;

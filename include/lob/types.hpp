@@ -18,10 +18,18 @@ enum class OrderType : std::uint8_t {
     Market = 1,
 };
 
+// Time-in-force is a matching rule, not a resting-node field: only GTC can rest.
+enum class TimeInForce : std::uint8_t {
+    Gtc = 0,  // match, then rest any remainder (limit only; market never rests)
+    Ioc = 1,  // match now, cancel leftover; never rests
+    Fok = 2,  // fill the entire qty now or reject; never partials, never rests
+};
+
 enum class Error : std::uint8_t {
     InvalidQty = 1,
     InvalidPrice = 2,
     NotFound = 3,
+    WouldNotFill = 4,  // FOK could not take its full qty against crossing liquidity
 };
 
 inline constexpr std::string_view to_string(Side s) noexcept {
@@ -32,6 +40,18 @@ inline constexpr std::string_view to_string(OrderType t) noexcept {
     return t == OrderType::Limit ? "limit" : "market";
 }
 
+inline constexpr std::string_view to_string(TimeInForce t) noexcept {
+    switch (t) {
+        case TimeInForce::Gtc:
+            return "gtc";
+        case TimeInForce::Ioc:
+            return "ioc";
+        case TimeInForce::Fok:
+            return "fok";
+    }
+    return "unknown";
+}
+
 inline constexpr std::string_view to_string(Error e) noexcept {
     switch (e) {
         case Error::InvalidQty:
@@ -40,6 +60,8 @@ inline constexpr std::string_view to_string(Error e) noexcept {
             return "invalid_price";
         case Error::NotFound:
             return "not_found";
+        case Error::WouldNotFill:
+            return "would_not_fill";
     }
     return "unknown";
 }

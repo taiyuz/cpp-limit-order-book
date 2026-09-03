@@ -51,9 +51,12 @@ public:
     MatchingEngine& operator=(MatchingEngine&&) = delete;
     ~MatchingEngine() = default;
 
-    // Limit: match, then rest any remainder (GTC). Market: match, cancel leftover.
+    // Limit GTC: match, then rest any remainder. Limit IOC: match, cancel leftover.
+    // Limit FOK: fill the entire qty now or reject with WouldNotFill (book untouched).
+    // Market never rests; market FOK is all-or-nothing against the opposite book.
     // Trade records from this call are in last_trades() until the next mutating call.
-    [[nodiscard]] Result submit(Side side, OrderType type, Price price, Qty qty);
+    [[nodiscard]] Result submit(Side side, OrderType type, Price price, Qty qty,
+                                TimeInForce tif = TimeInForce::Gtc);
 
     [[nodiscard]] CancelResult cancel(OrderId id);
 
@@ -89,9 +92,10 @@ public:
 private:
     Qty match_buy(OrderNode* taker, bool market);
     Qty match_sell(OrderNode* taker, bool market);
+    [[nodiscard]] Qty available_to_take(Side side, Price limit, bool market) const noexcept;
     void rest(OrderNode* node);
     void destroy_resting(OrderNode* node);
-    Result finish(OrderNode* node, Qty filled, bool market);
+    Result finish(OrderNode* node, Qty filled, bool rest_remainder);
 
     NodePool pool_;
     OrderBook book_;
