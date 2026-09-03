@@ -19,7 +19,9 @@ MatchingEngine
 
 `OrderNode` is exactly 64 bytes: `prev`, `next`, `level*`, `id`, `price`,
 `remaining`, `seq`, `side`. One cache line per resting order. The `level*`
-back-pointer is what makes cancel O(1) unlink instead of a scan.
+back-pointer is what makes cancel O(1) unlink instead of a scan. Time-in-force
+is not stored on the node: only GTC remains can rest, so IOC/FOK never occupy a
+FIFO slot.
 
 ### Why not `std::map<Price, std::deque<Order>>`
 
@@ -51,6 +53,9 @@ by one incoming order. Hash ops are amortized expected O(1).
 |---|---|---|
 | Limit rest (no match) | O(log P) | map `try_emplace` + O(1) pool + O(1) hash insert |
 | Limit / market match | O(F + L log P) | each fill is O(1); L empty levels erased |
+| Limit IOC | O(F + L log P) | same match walk; leftover cancelled, not rested |
+| Limit FOK | O(P_cross) reject or O(F + L log P) fill | peeks opposite crossing qty first; no partials |
+| Market FOK | O(P_opp) reject or O(F + L log P) fill | needs the whole opposite book |
 | Cancel | O(1) typical | O(log P) if that order was the last at its price |
 | Modify qty down, same px | O(1) | stays in FIFO, keeps time priority |
 | Modify qty up or price | O(log P + match) | pulled, loses time priority, may re-cross |
@@ -58,6 +63,12 @@ by one incoming order. Hash ops are amortized expected O(1).
 | BBO / `top()` | O(1) | `map::begin()` |
 | Quantity at a price | O(log P) | map find |
 | `snapshot()` / `dump()` | O(P + N) | allocates; debug only, not the hot path |
+
+P_cross is opposite levels that still price-cross the incoming limit; P_opp is
+all opposite live prices. FOK peeks by walking those map nodes and summing
+`PriceLevel::total_qty()` *before* any unlink. The book is single-threaded, so
+the peek cannot race the match. Rolling back partial fills would be the wrong
+shape: a reject must leave makers untouched.
 
 Incoming orders match at the **maker** price (price-time). Buy limits cross
 asks with `ask <= limit`; sell limits cross bids with `bid >= limit`. The book
@@ -128,15 +139,25 @@ Gateway ──► shard(instrument_id) ──► engine[i].submit(...)
 
 | Type | Rest remainder? | Notes |
 |---|---|---|
-| Limit | yes (GTC) | |
+| Limit GTC | yes | default `TimeInForce` |
+| Limit IOC | no | leftover cancelled; still respects the limit price |
+| Limit FOK | no | full qty now or `Error::WouldNotFill`; book unchanged |
 | Market | no | leftover is cancelled, reported in `remaining` |
+| Market FOK | no | all-or-nothing against the whole opposite book |
 | Cancel | — | unknown id → `Error::NotFound` |
 | Modify qty down, same price | yes | keeps queue position |
 | Modify qty up or price | maybe | new time priority; aggressive price will take |
 | Replace | maybe | cancel then new GTC limit, same side; new id; always new time priority |
 
-No IOC/FOK flags, no hidden/iceberg, no auctions, no self-trade prevention, no
-STP, no lots/tick validation beyond `> 0`, no persistence, no recovery log.
+No hidden/iceberg, no auctions, no self-trade prevention, no STP, no lots/tick
+validation beyond `> 0`, no persistence, no recovery log. Market orders never
+rest, even if submitted as GTC: there is no price at which a market leftover
+could sit.
+
+FOK is not IOC-plus-regret. `available_to_take` sums crossing level aggregates
+first; only then does the matcher unlink. A FOK that would have to walk into a
+non-crossing price, or that would only partial-fill the last crossing level,
+rejects with an empty `last_trades()`.
 
 Replace is not modify. `modify` keeps the order id; qty-down at the same price
 keeps FIFO place. `replace` always allocates a new id, always goes to the back
@@ -152,9 +173,10 @@ matching hot path; they allocate.
 
 ## Testing stance
 
-Correctness is in `tests/test_engine.cpp` and `tests/test_replace.cpp` (FIFO,
-price-time, partials, market walks, cancel-in-the-middle, modify priority,
-replace new-id / FIFO loss / aggressive remainder / missing id, book never
-crosses, empty-book market, unique ids, no STP, debug snapshot). CI runs that
-suite under ASan+UBSan. Latency is a separate harness so sanitizers do not
-pollute numbers.
+Correctness is in `tests/test_engine.cpp`, `tests/test_replace.cpp`, and
+`tests/test_tif.cpp` (FIFO, price-time, partials, market walks, cancel-in-the-
+middle, modify priority, replace new-id / FIFO loss / aggressive remainder /
+missing id, IOC leftover cancel / limit respect, FOK all-or-nothing / no
+partial makers, book never crosses, empty-book market, unique ids, no STP,
+debug snapshot). CI runs that suite under ASan+UBSan. Latency is a separate
+harness so sanitizers do not pollute numbers.
